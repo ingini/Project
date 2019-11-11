@@ -10,3 +10,4 @@
 
 크롤링 (네이버api, natepann, 루리웹 data gathering)
 
+키움 api 연동해서 주식시장 정보 크롤링
