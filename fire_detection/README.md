@@ -1,4 +1,5 @@
 FireNet
+
 FireNet is an artificial intelligence project for real-time fire detection.
 
 
