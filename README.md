@@ -16,3 +16,8 @@ smart / 스마트 냉장고 - OCR을 하기 위해 pixcel link, C-RNN 을 통해
         이를 통해 냉장고에 이 기술을 적용하여 냉장고 식재료 관리를 할 수 있는 방법들을 제시하여 스마트 냉장고를 만들 수 있도록 하는 것을 목표로 하고         있습니다.
 
 groupSendSMS 소스에 error 가 있을 경우 문자로 알람 서비스를 보내기 위해 만든 소스 
+
+
+# Project learning
+        fire_detection / deep learning  - 
+        coursera / machine learning  - 
