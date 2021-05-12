@@ -1298,13 +1298,13 @@ class RealType(object):
 
 
 def test_to_get_account():
-    kiwoom.set_input_value("계좌번호", "8086919011")
-    kiwoom.set_input_value("비밀번호", "0000")
+    kiwoom.set_input_value("계좌번호", "")
+    kiwoom.set_input_value("비밀번호", "")
     kiwoom.comm_rq_data("계좌평가잔고내역요청", "opw00018", 2, "2000")
     while kiwoom.inquiry == '2':
         time.sleep(0.2)
-        kiwoom.set_input_value("계좌번호", "8086919011")
-        kiwoom.set_input_value("비밀번호", "0000")
+        kiwoom.set_input_value("계좌번호", "")
+        kiwoom.set_input_value("비밀번호", "")
         kiwoom.comm_rq_data("계좌평가잔고내역요청", "opw00018", 2, "2")
 
     print(kiwoom.data_opw00018['account_evaluation'])
@@ -1344,7 +1344,7 @@ if __name__ == "__main__":
     kiwoom = Kiwoom()
     kiwoom.comm_connect()
 
-    conn = pymysql.connect(host='172.16.71.100', port=51000, user='tqtdb', password='tqtdb1!', db='QTDB',
+    conn = pymysql.connect(host='ip', port=portnumber, user='id', password='pw', db='QTDB',
                            charset='utf8', local_infile=True)
     curs = conn.cursor()
 
