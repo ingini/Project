@@ -1,0 +1,231 @@
+
+
+wget http://apache.mirror.cdnetworks.com/hadoop/common/hadoop-3.3.0/hadoop-3.3.0.tar.gz
+
+설치 시작
+
+[hadoop@localhost ~]$ wget http://apache.mirror.cdnetworks.com/hadoop/common/hadoop-3.3.0/hadoop-3.3.0.tar.gz
+
+ 
+
+[hadoop@localhost ~]$ tar xvzf hadoop-3.3.0.tar.gz
+
+ 
+
+[hadoop@localhost ~]$ vi .bash_profile
+
+-----------------------------------------------------------------------------
+
+# User specific environment and startup programs
+
+export JAVA_HOME=/usr/java/jdk1.8.0_65           #자바를 수동으로 설치한 경우 (버전을 확인)
+
+또는 export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.65-3.b17.el7.x86_64   #자동
+
+
+
+export HADOOP_HOME=/home/hadoop/hadoop-2.7.1     #둘 중 하나 만
+
+export HADOOP_HOME=$HOME/hadoop-2.7.1            #둘 중 하나 만
+
+ 
+
+PATH=$PATH:$HOME/.local/bin:$HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin   #추가
+
+export PATH
+
+-----------------------------------------------------------------------------
+
+[hadoop@localhost ~]$ source .bash_profile       :  .bash_profile을 수정된 내용으로 등록
+
+ 
+
+[hadoop@localhost ~]$ cd hadoop-2.7.1/etc/hadoop/     : 디렉토리 이동
+
+ 
+
+아래의 실행과 관련된 파일은 /home/hadoop/hadoop-2.7.1/etc/hadoop 디렉토리에 저장되어 있다.
+
+ 
+
+[hadoop@localhost hadoop]$ vi hadoop-env.sh     :  MR framework 주요 설정 파일
+
+ export JAVA_HOME=/usr/java/jdk1.8.0_65     <--- 파일 상단에 추가한다.  #수동으로 설치한 경우
+
+또는 export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.65-3.b17.el7.x86_64  #자동
+
+#export JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk-1.8.0.262.b10-0.el7_8.x86_64 <<
+ 
+
+설명 : hadoop-env.sh : JobTracker(NameNode)나 TaskTracker(dataNode)의 자바 옵션이나, 로그, 프로세스 ID용 디렉토리 설정을 기술한다. 그러니까 hadoop-env.sh 는 자바 경로나 JobTracker나 TaskTracker에서 사용하는 JVM의 heap 메모리 크기, 가비지 컬렉션 옵션 등 자바 관련 설정을 한다. 그리고 로그 디렉토리, 프로세스 ID용 디렉토리 설정을 기술한다. 하둡을 실행하는 셸 스크립트 파일에서 필요한 변수를 설정한다. $HADOOP_HOME/bin 디렉토리에 있는 쉘 스크립트 파일들이 hadoop-env.sh 파일을 사용한다.
+
+하둡 실행 시, 경고 메시지가 계속 뜰 수 있다.  “Warning: $HADOOP_HOME is deprecated” 그러면  hadoop-env.sh에  export HADOOP_HOME_WARN_SUPPRESS=1  을  추가 해 준다.  
+
+ 
+
+[hadoop@localhost hadoop]$ vi core-site.xml        : 하둡 공통 설정을 기술
+
+<configuration>
+
+        <property>
+
+                <name>fs.default.name</name>
+
+                <value>hdfs://localhost:9000</value>
+
+        </property>
+
+</configuration>
+
+설명 : fs.default.name 속성을 hdfs://localhost:9000 로 설정하게 되면 URI에 hdfs 스키마를 사용함으로 해서 로컬 파일 시스템이 아닌 hdfs를 사용한다는 뜻이다. 또한 NameNode가 9000번 포트를 통해 요청을 접수한다는 것을 의미하기도 한다.
+
+HDFS와 맵리듀스에서 공통적으로 사용할 환경정보를 설정한다. Hadoop-core jar파일에 포함되어 있는 core-default.xml 파일을 오버라이드 한 파일이다. core-site.xml에 없는 설정 값은 core-default.xml에 있는 기본 값을 사용한다.
+
+
+
+
+
+[hadoop@localhost hadoop]$ vi hdfs-site.xml      : HDFS 동작에 관한 설정
+
+<configuration>
+
+     <property>
+
+          <name>dfs.replication</name>
+
+          <value>1</value>
+
+     </property>
+
+</configuration>
+
+설명 :
+
+ - dfs.replication : 유사 분산 모드에서는 파일 시스템으로 로컬 파일 시스템이 아닌 HDFS를 사용한다. 또한 이 모드에서는 DataNode가 하나만 동작하기 때문에 초기 복제 수인 3을 사용하면 HDFS가 동작하지 않는다. 그러므로 replication 수를 1로 설정해 준다.
+
+HDFS에서 사용할 환경 정보를 설정한다. Hadoop-core jar파일에 포함되어 있는 hdfs-default.xml 파일을 오버라이드 한 파일이다. hdfs-site.xml에 없는 설정 값은 hdfs-default.xml에 있는 기본 값을 사용한다.
+
+
+
+
+
+[hadoop@localhost hadoop]$ cp mapred-site.xml.template mapred-site.xml
+
+
+
+[hadoop@localhost hadoop]$ vi mapred-site.xml      : MR framework 설정 파일
+
+<configuration>
+
+     <property>
+
+          <name>mapreduce.framework.name</name>
+
+          <value>yarn</value>
+
+     </property>
+
+</configuration>
+
+설명 : mapred-site.xml은 JobTracker나 TaskTracker에서 사용하는 설정을 기술한다. MR의 동작을 설정하는 것이다.
+
+
+
+
+
+[hadoop@localhost hadoop]$ vi yarn-site.xml
+
+<configuration>
+
+<!-- Site specific YARN configuration properties -->
+
+     <property>
+
+          <name>yarn.nodemanager.aux-services</name>
+
+          <value>mapreduce_shuffle</value>
+
+     </property>
+
+     <property>
+
+          <name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+
+          <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+
+     </property>
+
+</configuration>
+
+
+
+[hadoop@localhost ~]$ cd
+
+ 
+
+처음 HDFS를 사용할 때는 HDFS를 포맷할 필요가 있다. NameNode와 DataNode가 정지되어 있는 상태에서 아래 명령을 사용해 포맷한다.
+
+[hadoop@localhost ~]$ hadoop namenode -format
+
+[hadoop@localhost ~]$ hadoop version    : 하둡 버전 확인
+
+ 
+
+=설치 완료 후 ssh 설정==================================
+
+ssh : 원격지 시스템에 접근하여 암호화된 메시지를 전송할 수 있는 프로그램
+
+[hadoop@localhost ~]$ ssh-keygen -t rsa         #ssh 키 생성
+
+[hadoop@localhost ~]$ cd .ssh
+
+[hadoop@localhost .ssh]$ scp id_rsa.pub /home/hadoop/.ssh/authorized_keys       #생성키를 접속할 때 사용하도록 복사함
+
+[hadoop@localhost .ssh]$ ssh hadoop@localhost
+
+위의 명령을 입력하면 암호 묻는 작업을 하지 않게 된다.  1회만 실행하면 된다.
+
+ 
+
+ 
+
+아래의 실행과 관련된 파일은 /home/hadoop/hadoop-2.7.1/sbin 디렉토리에 있다.
+
+ 
+
+실행방법 )
+
+[hadoop@localhost ~]$ start-dfs.sh 
+
+[hadoop@localhost ~]$ start-yarn.sh       #ResourceManager 서비스가 실행되지 않을 경우 사용
+
+[hadoop@localhost ~]$ mr-jobhistory-daemon.sh start historyserver
+
+ 
+
+하둡 종료
+
+[hadoop@localhost ~]$ stop-dfs.sh
+
+[hadoop@localhost ~]$ stop-yarn.sh
+
+ 
+
+[hadoop@localhost ~]$ jps   : 하둡 상태 확인 - NameNode와 DataNode의 동작여부 확인
+
+6080 DataNode
+6833 NodeManager
+7284 JobHistoryServer
+6421 SecondaryNameNode
+5846 NameNode
+7320 Jps
+6701 ResourceManager
+
+ 
+
+* Summary(HDFS 상태 확인)  :   http://localhost:50070/
+
+* All Applications                :   http://localhost:8088/
+
+
+
