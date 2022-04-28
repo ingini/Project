@@ -17,6 +17,7 @@ smart / 스마트 냉장고 - OCR을 하기 위해 pixcel link, C-RNN 을 통해
 
 groupSendSMS 소스에 error 가 있을 경우 문자로 알람 서비스를 보내기 위해 만든 소스 
 
+Machine Translation Model : english --> korean 
 
 # Project learning
         fire_detection / deep learning  - 
