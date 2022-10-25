@@ -1,0 +1,249 @@
+import json
+import time
+import boto3
+import signal
+import traceback
+from pytz import timezone
+from timeout import LambdaTimeoutException
+from datetime import datetime
+from io import StringIO
+from confluent_kafka import Consumer, KafkaError, KafkaException, TopicPartition
+
+
+brokers_ip_in_same_zone = ['172.40.1.13']
+topics = ['oms-otoplug-receiver-service.v2.device-cycle', 'oms-otoplug-receiver-service.v2.device-trip', 'oms-otoplug-receiver-service.v2.device-sensor']
+valid_customer_id = ['dbd8e7fc563e462781c24b39d4378568', 'd9846ad314f041e0b5bf4cca2418e03a', '2cfd111262b04a329e0c5366f46c4a4e']
+
+s3_trigger_bucket = 'hm-datalake-prestaging.ver01'
+s3_trigger_key = 'job/otoplug/lambda_ap-northeast-2c/lag'
+running_state_parameter_store = '/hm_datalake/otoplug/kafka_consumer/lambda_2c/running_state'
+max_poll_count_parameter_store = '/hm_datalake/otoplug/kafka_consumer/lambda_2c/max_poll_count'
+max_poll_timeout_parameter_store = '/hm_datalake/otoplug/kafka_consumer/lambda_2c/max_poll_timeout'
+
+upload_bucket = 'hm-datalake-prestaging.ver01'
+upload_prefix = 'raw/otoplug/live'
+
+message_json_file_name = '/tmp/message.json'
+
+lag_wait_threshold = 10
+lag_wait_seconds = 10
+ssm_wait_seconds = 10
+
+sqs = boto3.client('sqs')
+
+def timeout_handler(_signal, _frame):
+    raise LambdaTimeoutException('Time limit exceeded')
+
+signal.signal(signal.SIGALRM, timeout_handler)
+
+
+def get_current_time_millis():
+    return round(time.time() * 1000)
+
+
+def consume_loop(consumer, topic, partition, offset, max_poll_count, max_poll_timeout_ms):
+    
+    start_time_millis = get_current_time_millis()
+    last_offset = None
+    print('topic: {}, partition: {}, offset: {}, max_poll_count: {}, max_poll_timeout_ms: {}'.format(topic, partition, offset, max_poll_count, max_poll_timeout_ms))
+
+    consumer.assign([TopicPartition(topic, partition, offset)])
+    
+    upload_key = datetime.now(timezone('Asia/Seoul')).strftime('{}/{}/yy=%Y/mm=%m/dd=%d/{}_%Y%m%d%H%M%S.json'.format(upload_prefix, topic, topic))
+    
+    
+    is_empty_message = True
+    
+    with open(message_json_file_name, 'w+') as json_file:
+
+        for i in range(1, max_poll_count):
+            msg = consumer.poll(timeout=1.0)
+            
+            if msg is None:
+                break
+    
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    # End of partition event
+                    print('{} [{}] reached end at offset {}'.format(msg.topic(), msg.partition(), msg.offset()))
+                elif msg.error():
+                    raise KafkaException(msg.error())
+    
+            else:
+                msg_json = json.loads(msg.value().decode('utf-8'))
+                is_empty_message = False
+                
+                if "meta" in msg_json and "customerId" in msg_json["meta"]:
+                    customerId = msg_json["meta"]["customerId"]
+                        
+                    if customerId in valid_customer_id:
+                        json.dump(msg_json, json_file)
+                        json_file.write('\n')
+                        # This should be commended in service mode
+                        # print('topic : {}, offset: {},  values : {}'.format(msg.topic(), msg.offset(), msg.value().decode('utf-8')))
+                        
+                    else:
+                        # customers not described above 'valid_customer_id' MUST not be used
+                        # print('invalid customer id: {}'.format(customerId))
+                        pass
+                # This should be commended in service mode
+                # print('{} messages consumed'.format(i))
+                
+                last_offset = msg.offset()
+            
+            if (get_current_time_millis() - start_time_millis) > max_poll_timeout_ms:
+                print('max poll timeout')
+                last_offset = msg.offset()
+                break
+            
+            elif i == max_poll_count - 1:
+                print('max poll count reached')
+                last_offset = msg.offset()
+                break
+    
+    if is_empty_message == False:
+        s3 = boto3.resource('s3')
+        print('upload {} into s3://{}/{}'.format(message_json_file_name, upload_bucket, upload_key))
+        s3.meta.client.upload_file(message_json_file_name, upload_bucket, upload_key)
+        consumer.commit(asynchronous=True)
+        
+    return last_offset
+
+
+def update_broker_partition_info(consumer):
+    partitions_in_same_zone = {}
+    brokers_id_in_same_zone = {}
+    list_topics = consumer.list_topics()
+    brokers = list_topics.brokers
+    for broker_id, broker_meta in brokers.items():
+        print('broker id {}: {}, {}'.format(broker_meta.id, broker_meta.host, broker_meta.port))
+        if broker_meta.host in brokers_ip_in_same_zone:
+            brokers_id_in_same_zone[broker_meta.id] = '{}:{}'.format(broker_meta.host,broker_meta.port)
+
+
+    print(brokers_id_in_same_zone)
+    list_topics = list_topics.topics
+    for topic in topics:
+        partitions = list_topics[topic].partitions
+        for partition_id, partition_meta in partitions.items():
+            print('topic {}: partition {} => leader broker {}'.format(topic, partition_meta.id, partition_meta.leader))
+            if partition_meta.leader in brokers_id_in_same_zone:
+                if topic not in partitions_in_same_zone:
+                    partitions_in_same_zone[topic] = [partition_meta.id]
+                else:
+                    partitions_in_same_zone[topic].append(partition_meta.id)
+    print('partitions in same zone:', partitions_in_same_zone)
+    return partitions_in_same_zone
+
+
+def ssm_put_parameter(ssm, Name, Value, Overwrite, Type=None):
+    while True:
+        try:
+            if Type is not None:
+                ssm.put_parameter(Name=Name, Value=Value, Overwrite=Overwrite, Type=Type)
+            else:
+                ssm.put_parameter(Name=Name, Value=Value, Overwrite=Overwrite)
+            break
+        except:
+            traceback.print_exc()
+            error_reason = traceback.format_exc()
+            if 'TooManyUpdates' in error_reason:
+                print('put_parameter failed, waiting {} seconds to avoid TooManyUpdates'.format(ssm_wait_seconds))
+                time.sleep(ssm_wait_seconds)
+            elif 'Rate exceeded' in error_reason:
+                print('put_parameter failed(Rate exceeded) waiting {} seconds to try again'.format(ssm_wait_seconds))
+                time.sleep(ssm_wait_seconds)
+            else:
+                print('put_parameter failed, unknown error')
+                raise Exception
+                
+
+
+def lambda_handler(event, context):
+    try:
+        signal.alarm(int(context.get_remaining_time_in_millis() / 1000) - 1)
+    
+        s3_resource = boto3.resource('s3')
+        ssm = boto3.client('ssm')
+        running_state = ssm.get_parameter(Name=running_state_parameter_store, WithDecryption=False)['Parameter']['Value']
+        
+        if ssm == 'running':
+            print ('already running')
+            return
+    
+        # ssm.put_parameter(Name=running_state_parameter_store, Value='running', Overwrite=True)
+        ssm_put_parameter(ssm=ssm, Name=running_state_parameter_store, Value='running', Overwrite=True)
+        conf = {'bootstrap.servers': 'omdss1-internal.otoplug.net:23092,omdss2-internal.otoplug.net:23192,omdss3-internal.otoplug.net:23292',
+                'group.id': "hm_datalake_consumer",
+                'auto.offset.reset': 'earliest'}
+    
+        max_poll_count = int(ssm.get_parameter(Name=max_poll_count_parameter_store, WithDecryption=False)['Parameter']['Value'])
+        max_poll_timeout_ms = int(ssm.get_parameter(Name=max_poll_timeout_parameter_store, WithDecryption=False)['Parameter']['Value'])
+        
+        consumer = Consumer(conf)
+        
+        partitions_in_same_zone = update_broker_partition_info(consumer)
+        
+        lags = []
+
+        for topic, partitions in partitions_in_same_zone.items():
+            topic_partitions = consumer.position([TopicPartition(topic, partition) for partition in partitions])
+            for topic_partition in topic_partitions:
+                last_offset_of_consumer = consume_loop(consumer, topic, topic_partition.partition, topic_partition.offset,  max_poll_count, max_poll_timeout_ms)
+                lowest_offset, highest_offset = consumer.get_watermark_offsets(partition=topic_partition, timeout=10.0, cached=False)
+                
+                if last_offset_of_consumer == None:
+                    last_offset_of_consumer = highest_offset
+                
+                lag = highest_offset - last_offset_of_consumer
+                
+                offset_info = {
+                    "topic": topic,
+                    "partition" : topic_partition.partition,
+                    "lowest_offset" : lowest_offset,
+                    "highest_offset" : highest_offset,
+                    "last_offset_of_consumer" : last_offset_of_consumer,
+                    "lag" : lag
+                }
+                
+                lags.append(lag)
+                
+                print('offset info', offset_info)
+                
+                offset_parameter_store = '/hm_datalake/otoplug/kafka_consumer/offset_info/{}/{}'.format(topic, topic_partition.partition)
+                
+                # ssm.put_parameter(Name=offset_parameter_store, Value=json.dumps(offset_info), Overwrite=True, Type='String')
+                ssm_put_parameter(ssm=ssm, Name=offset_parameter_store, Value=json.dumps(offset_info), Overwrite=True, Type='String')
+                
+                lag_file = StringIO(str(lag))
+        
+        # ssm.put_parameter(Name=running_state_parameter_store, Value='idle', Overwrite=True)
+        ssm_put_parameter(ssm=ssm, Name=running_state_parameter_store, Value='idle', Overwrite=True)
+        
+        # Close down consumer to commit final offsets.
+        consumer.close()
+        
+        signal.alarm(0)
+        
+        # To stop streaming, disable this
+        s3_resource.Object(s3_trigger_bucket, s3_trigger_key).put(Body=lag_file.getvalue())
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps('success')
+        }
+        
+    except LambdaTimeoutException as e:
+        msg = sqs.send_message(QueueUrl="https://sqs.ap-northeast-2.amazonaws.com/284145144652/Lambda-Daily-Error-Report", MessageBody="Timeout,{},{}".format(context.function_name, context.aws_request_id))
+        ssm.put_parameter(Name=running_state_parameter_store, Value='idle', Overwrite=True)
+        s3_resource.Object(s3_trigger_bucket, s3_trigger_key).put(Body='lambda timeout')
+        return {'statusCode': 400, 'body': str(e)}
+    except Exception as e:
+        traceback.print_exc()
+        msg = sqs.send_message(QueueUrl="https://sqs.ap-northeast-2.amazonaws.com/284145144652/Lambda-Daily-Error-Report", MessageBody="Error,{},{},{}".format(context.function_name, context.aws_request_id, traceback.format_exc()))
+        ssm.put_parameter(Name=running_state_parameter_store, Value='idle', Overwrite=True)
+        s3_resource.Object(s3_trigger_bucket, s3_trigger_key).put(Body='lambda error')
+        return {'statusCode': 400, 'body': str(e)}  
+
+if __name__ == "__main__":
+    lambda_handler(None, None)
