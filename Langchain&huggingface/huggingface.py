@@ -1,6 +1,6 @@
 import os
-os.environ['OPENAI_API_KEY'] = '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'
-os.environ['HUGGINGFACEHUB_API_TOKEN'] = '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'
+os.environ['OPENAI_API_KEY'] = ''
+os.environ['HUGGINGFACEHUB_API_TOKEN'] = ''
 
 # '''
 # from langchain import LLMChain
@@ -132,8 +132,8 @@ print(llm_chain.run(question=question))
 
 # # API KEY SETTING
 import os 
-OPENAI_API_KEY = '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'
-HUGGINGFACEHUB_API_TOKEN = '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' # Model download 무료
+OPENAI_API_KEY = ''
+HUGGINGFACEHUB_API_TOKEN = '' # Model download 무료
 #SERPAPI_API_KEY = '' # 월 100회 무료 
 os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
 os.environ['HUGGINGFACEHUB_API_TOKEN'] = HUGGINGFACEHUB_API_TOKEN
